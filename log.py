@@ -240,11 +240,11 @@ class ResultsLog(object):
             self.hd_experiment.end()
 
 
-def save_checkpoint(state, is_best, path='.', filename='checkpoint.pth.tar', save_all=False):
-    filename = os.path.join(path, filename)
+def save_checkpoint(state, is_best=False, path='.', filename='checkpoint', save_freq=-1,suffix = '.pth.tar'):
+    filename = os.path.join(path, filename) + suffix
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, os.path.join(path, 'model_best.pth.tar'))
-    if save_all:
-        shutil.copyfile(filename, os.path.join(
-            path, 'checkpoint_epoch_%s.pth.tar' % state['epoch']))
+        shutil.copyfile(filename, os.path.join(path, 'model_best') + suffix)
+    if save_freq > 0 and (state['epoch'] % save_freq == 0):
+        print(f"saving checkpoint epoch {state['epoch']}")
+        shutil.copyfile(filename, os.path.join(path, 'checkpoint_epoch_{:04d}{}'.format(state['epoch'],suffix)))

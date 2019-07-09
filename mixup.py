@@ -33,21 +33,30 @@ class MixUp(nn.Module):
             self.mix_values = torch.tensor([beta(alpha, alpha)],
                                            dtype=torch.float)
 
-    def mix_target(self, y, n_class):
+    def mix_target(self, y, n_class=None):
         if not self.training or \
             self.mix_values is None or\
                 self.mix_values is None:
             return y
-        y = onehot(y, n_class).to(dtype=torch.float)
+        if n_class:
+            y = onehot(y, n_class).to(dtype=torch.float)
         idx = self.mix_index.to(device=y.device)
         y_mix = y.index_select(self.batch_dim, idx)
         return self.mix(y, y_mix)
 
-    def forward(self, x):
+    def forward(self, x,sample = None):
+        if sample is not None:
+            if sample[1] > x.size(0):
+                sample[1] = x.size(0)
+            self.sample(*sample)
+
         if not self.training or \
             self.mix_values is None or\
                 self.mix_values is None:
             return x
+
         idx = self.mix_index.to(device=x.device)
         x_mix = x.index_select(self.batch_dim, idx)
         return self.mix(x, x_mix)
+
+#class MixupLoader(nn.data.Loader)

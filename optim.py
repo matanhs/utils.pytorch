@@ -6,9 +6,9 @@ from .regime import Regime
 from .param_filter import FilterParameters
 from . import regularization
 import torch.nn as nn
-
+from apex.parallel.LARC import LARC
 _OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
-
+_OPTIMIZERS.update({'LARC': LARC})
 try:
     from adabound import AdaBound
     _OPTIMIZERS['AdaBound'] = AdaBound
@@ -116,7 +116,10 @@ class OptimRegime(Regime):
                 self.optimizer = torch.optim.SGD(self.parameters, lr=0)
                 logging.debug('OPTIMIZER - reset setting')
             if not isinstance(self.optimizer, optim_method):
-                self.optimizer = optim_method(self.optimizer.param_groups)
+                if setting.get('optimizer', None) == 'LARC':
+                    self.optimizer = optim_method(self.optimizer)
+                else:
+                    self.optimizer = optim_method(self.optimizer.param_groups)
                 logging.debug('OPTIMIZER - setting method = %s' %
                               setting['optimizer'])
         for param_group in self.optimizer.param_groups:
@@ -197,7 +200,10 @@ class OptimRegime(Regime):
         if self.use_float_copy:
             copy_params_grad(self.parameters, self._original_parameters)
         self.regularizer.pre_step()
-        self.optimizer.step(closure)
+        if isinstance(self.optimizer,LARC):
+            self.optimizer.step()
+        else:
+            self.optimizer.step(closure)
         self.regularizer.post_step()
         if self.use_float_copy:
             copy_params(self._original_parameters, self.parameters)
@@ -257,3 +263,14 @@ class MultiOptimRegime(OptimRegime):
 
     def __repr__(self):
         return str([str(optim) for optim in self.optim_regime_list])
+
+
+class GradClippingHook():
+    def __init(self,norm = 1):
+        self.norm = norm
+    def __call__(self,module, grad_input, grad_out):
+        print('module hook')
+        print('grad_out', grad_out)
+        norm = grad_out.norm()
+        grad_out= grad_out if norm < self.norm else (grad_out/norm * self.norm)
+        module.grad_out = grad_out

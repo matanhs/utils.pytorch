@@ -1,12 +1,41 @@
 import torch
 from copy import deepcopy
 from six import string_types
+import math
 
 
 def eval_func(f, x):
     if isinstance(f, string_types):
         f = eval(f)
     return f(x)
+
+
+def ramp_up_lr(lr0, lrT, T):
+    rate = (lrT - lr0) / T
+    return "lambda t: {'lr': %s + t * %s}" % (lr0, rate)
+
+
+def exp_decay_lr(lr0, lrT,T0, T):
+    factor = torch.exp(1/(T-T0)*torch.log(torch.tensor(lrT/(lr0+1e-12)))).item()
+    print('lr decay scale:',factor)
+    return "lambda t: {'lr': max(%s * %s ** (t-%s),%s)}" % (lr0, factor,T0,lrT)
+
+
+def lr_drops(lr0, lrT,T0, T,n_drops):
+    steps_T=T-T0
+    steps_per_drop=steps_T//(n_drops+1)
+    factor= torch.exp(1/(n_drops)*torch.log(torch.tensor(lrT/lr0))).item()
+    print('lr drop scale:',factor)
+    return "lambda t: {'lr': max(%s * %s ** ((t-%s)//%s),%s)}" % (lr0, factor,T0,steps_per_drop,lrT)
+
+
+def cosine_anneal_lr(lr0,lr_T,T0,T,n_drops=-1):
+    delta_T=T-T0
+    if n_drops>0:
+        steps_per_drop=delta_T//(n_drops+1)
+        return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*(t//{steps_per_drop})/{n_drops}))/2}}"
+    else:
+        return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*t/{delta_T}))/2}}"
 
 
 class Regime(object):

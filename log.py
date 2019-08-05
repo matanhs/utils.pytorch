@@ -114,6 +114,8 @@ class ResultsLog(object):
         data_format: str('csv'|'json')
             which file format to use to save the data
         """
+        self.data_format = data_format
+
         if data_format not in ResultsLog.supported_data_formats:
             raise ValueError('data_format must of the following: ' +
                              '|'.join(['{}'.format(k) for k in ResultsLog.supported_data_formats]))
@@ -139,7 +141,6 @@ class ResultsLog(object):
             self.results = pd.DataFrame()
 
         self.title = title
-        self.data_format = data_format
 
         if HYPERDASH_AVAILABLE:
             name = self.title if title != '' else path
@@ -207,9 +208,9 @@ class ResultsLog(object):
         path = path or self.data_path
         if os.path.isfile(path):
             if self.data_format == 'json':
-                self.results.read_json(path)
+                self.results = pd.read_json(path)
             else:
-                self.results.read_csv(path)
+                self.results = pd.read_csv(path)
         else:
             raise ValueError('{} isn''t a file'.format(path))
 

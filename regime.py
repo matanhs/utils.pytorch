@@ -33,10 +33,9 @@ def cosine_anneal_lr(lr0,lr_T,T0,T,n_drops=-1):
     delta_T=T-T0
     if n_drops>0:
         steps_per_drop=delta_T//(n_drops+1)
-        return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*(t//{steps_per_drop})/{n_drops}))/2}}"
+        return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*((t-{T0})//{steps_per_drop})/{n_drops}))/2}}"
     else:
-        return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*t/{delta_T}))/2}}"
-
+        return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*((t-{T0})/{delta_T})))/2}}"
 
 class Regime(object):
     """

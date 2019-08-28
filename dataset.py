@@ -10,7 +10,7 @@ from copy import copy
 import codecs
 from torch._utils import _accumulate
 from collections import Counter
-
+import torchvision
 
 class RandomSamplerReplacment(torch.utils.data.sampler.Sampler):
     """Samples elements randomly, with replacement.
@@ -315,3 +315,77 @@ class CSVDataset(LinedTextDataset):
             for field in fieldnames:
                 counters[field][value[field]] += 1
         return counters
+
+
+class RandomDatasetGenerator(Dataset):
+    def __init__(self,sample_shape,stats_mu=0.0,stats_std=1.0,limit=1000,transform=None,train=True,
+                 as_pil=True,seed=0):
+        super(RandomDatasetGenerator,self).__init__()
+        self.rnd_generator=torch.Generator()
+        self.len=limit
+        self.stats_mu=torch.tensor(stats_mu).reshape(sample_shape[0],1,1)
+        self.stats_std=torch.tensor(stats_std).reshape(sample_shape[0],1,1)
+        self.sample_shape=sample_shape
+        self.train=train
+        self.transform = transform
+        self.initial_seed_modifier=seed
+        if as_pil:
+            self.transform = torchvision.transforms.ToPILImage()
+            if transform:
+                self.transform=torchvision.transforms.Compose([self.transform,transform])
+
+    def __getitem__(self, index):
+        if self.train:
+            seed=index%self.len + self.initial_seed_modifier
+        else:
+            seed=(index%self.len) + self.len + self.initial_seed_modifier
+
+        self.rnd_generator.manual_seed(seed)
+        sample=torch.randn(self.sample_shape,generator=self.rnd_generator).mul_(self.stats_std).add_(self.stats_mu)
+        if self.transform:
+            sample=self.transform(sample)
+
+        return sample,0
+
+    def __len__(self):
+        return self.len
+
+
+class PriorDatasetGenerator(torch.nn.Module):
+    def __init__(self,generator,steps_per_epoch=1000,transform=None,train=True,
+                 as_pil=False,seed=0):
+        super(PriorDatasetGenerator,self).__init__()
+        self.rnd_generator=torch.Generator()
+        self.generator_model = generator
+        self.nclasses= generator.nclasses
+        self.len=steps_per_epoch
+        self.training = train
+        self.transform = transform
+        self.initial_seed_modifier=seed
+        if as_pil:
+            if isinstance(self.generator_model,torch.nn.Module):
+                self.transform=torchvision.transforms.Compose(lambda x:x.to('cpu').numpy(),
+                                                              torchvision.transforms.ToPILImage())
+            else:
+                self.transform = torchvision.transforms.ToPILImage()
+            if transform:
+                self.transform=torchvision.transforms.Compose([self.transform,transform])
+
+
+    def __getitem__(self, index):
+        if self.train:
+            seed=(index%self.len) + self.initial_seed_modifier
+        else:
+            seed=(index%self.len) + self.len + self.initial_seed_modifier
+
+        self.rnd_generator.manual_seed(seed)
+        target = torch.randint(self.nclasses, generator=self.rnd_generator)
+        sample = self.generator_model(target,self.rand_generator)
+
+        if self.transform:
+            sample=self.transform(sample)
+
+        return sample,target
+
+    def __len__(self):
+        return self.len

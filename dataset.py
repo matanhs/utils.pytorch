@@ -12,6 +12,11 @@ from torch._utils import _accumulate
 from collections import Counter
 import torchvision
 
+def transform_compose_maybe_none(a,b):
+    if a is None or b is None:
+        return a or b
+    return torchvision.transforms.Compose(a,b)
+
 class RandomSamplerReplacment(torch.utils.data.sampler.Sampler):
     """Samples elements randomly, with replacement.
     Arguments:
@@ -327,12 +332,11 @@ class RandomDatasetGenerator(Dataset):
         self.stats_std=torch.tensor(stats_std).reshape(sample_shape[0],1,1)
         self.sample_shape=sample_shape
         self.train=train
-        self.transform = transform
         self.initial_seed_modifier=seed
+        self.transform=None
         if as_pil:
             self.transform = torchvision.transforms.ToPILImage()
-            if transform:
-                self.transform=torchvision.transforms.Compose([self.transform,transform])
+        self.transform=transform_compose_maybe_none([self.transform,transform])
 
     def __getitem__(self, index):
         if self.train:
@@ -360,16 +364,14 @@ class PriorDatasetGenerator(torch.nn.Module):
         self.nclasses= generator.nclasses
         self.len=steps_per_epoch
         self.training = train
-        self.transform = transform
         self.initial_seed_modifier=seed
+        self.transform=None
         if as_pil:
+            self.transform = torchvision.transforms.ToPILImage()
             if isinstance(self.generator_model,torch.nn.Module):
-                self.transform=torchvision.transforms.Compose(lambda x:x.to('cpu').numpy(),
-                                                              torchvision.transforms.ToPILImage())
-            else:
-                self.transform = torchvision.transforms.ToPILImage()
-            if transform:
-                self.transform=torchvision.transforms.Compose([self.transform,transform])
+                self.transform=torchvision.transforms.Compose(lambda x:x.to('cpu').numpy(), self.transform)
+
+        self.transform=transform_compose_maybe_none([self.transform,transform])
 
 
     def __getitem__(self, index):

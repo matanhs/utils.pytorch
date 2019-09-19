@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-
+from argparse import ArgumentParser
 torch_dtypes = {
     'float': torch.float,
     'float32': torch.float32,
@@ -20,6 +20,38 @@ torch_dtypes = {
     'int64': torch.int64,
     'long': torch.long
 }
+
+
+'''
+strict dot dictionary, all attribute defined in _ATTRS must be provided.
+usefull for storing meta-data, dependent configurations etc. 
+'''
+class _META(object):
+    _ATTRS=[]
+    def __init__(self,**kwargs):
+        super(_META,self).__init__()
+        self.attrs={}
+        assert all([attr in kwargs for attr in _META._ATTRS])
+
+        for attr,val in kwargs.items():
+            setattr(self,attr,val)
+            self.attrs[attr]=val
+
+    def get_attrs(self):
+        return self.attrs
+
+
+class AutoArgParser(ArgumentParser):
+    def __init__(self):
+        super().__init__()
+
+    def auto_add(self,settings,enforce_type=True):
+        for k,v in settings.items():
+            if enforce_type:
+                self.add_argument(f'-{k}',default=v,type=type(v))
+            else:
+                self.add_argument(f'-{k}',default=v)
+
 
 
 def onehot(indexes, N=None, ignore_index=None):

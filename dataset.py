@@ -15,7 +15,7 @@ import torchvision
 def transform_compose_maybe_none(a,b):
     if a is None or b is None:
         return a or b
-    return torchvision.transforms.Compose(a,b)
+    return torchvision.transforms.Compose([a,b])
 
 class RandomSamplerReplacment(torch.utils.data.sampler.Sampler):
     """Samples elements randomly, with replacement.
@@ -336,7 +336,7 @@ class RandomDatasetGenerator(Dataset):
         self.transform=None
         if as_pil:
             self.transform = torchvision.transforms.ToPILImage()
-        self.transform=transform_compose_maybe_none([self.transform,transform])
+        self.transform=transform_compose_maybe_none(self.transform,transform)
 
     def __getitem__(self, index):
         if self.train:

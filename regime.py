@@ -15,16 +15,20 @@ def ramp_up_lr(lr0, lrT, T):
     return "lambda t: {'lr': %s + t * %s}" % (lr0, rate)
 
 
-def exp_decay_lr(lr0, lrT,T0, T):
-    factor = torch.exp(1/(T-T0)*torch.log(torch.tensor(lrT/(lr0+1e-12)))).item()
+def exp_decay_lr(lr0, lrT,T0, T,factor=None,n_drops=None):
+    tot_calls=T-T0
+    n_drops=n_drops or (tot_calls - 1)
+    drop_every_n_calles=max(1,tot_calls//(n_drops+1))
+    assert lr0>0 and lrT>0 and tot_calls>0
+    factor = factor or torch.exp(1/n_drops*torch.log(torch.tensor(lrT/lr0))).item()
     print('lr decay scale:',factor)
-    return "lambda t: {'lr': max(%s * %s ** (t-%s),%s)}" % (lr0, factor,T0,lrT)
+    return f"lambda t: {{'lr': max({lr0} * {factor} ** ((t-{T0})//{drop_every_n_calles}),{lrT})}}"
 
 
 def lr_drops(lr0, lrT,T0, T,n_drops):
     steps_T=T-T0
     steps_per_drop=steps_T//(n_drops+1)
-    factor= torch.exp(1/(n_drops)*torch.log(torch.tensor(lrT/lr0))).item()
+    factor= torch.exp(1/n_drops*torch.log(torch.tensor(lrT/lr0))).item()
     print('lr drop scale:',factor)
     return "lambda t: {'lr': max(%s * %s ** ((t-%s)//%s),%s)}" % (lr0, factor,T0,steps_per_drop,lrT)
 

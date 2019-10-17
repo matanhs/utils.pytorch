@@ -13,7 +13,7 @@ class AverageMeter(object):
         self.sum = 0
         self.sum_p2 = 0
         self.count = 0
-        self.var = 1
+        self.var = 0
 
     def update(self, val, n=1):
         self.val = val
@@ -22,7 +22,7 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
         if self.count > 1:
-            self.var = (self.sum_p2 - self.count * self.avg**2)/(self.count-1)
+            self.var = (self.sum_p2 - self.avg**2)/(self.count-1)
 
 
 class OnlineMeter(object):

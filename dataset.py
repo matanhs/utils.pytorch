@@ -324,7 +324,7 @@ class CSVDataset(LinedTextDataset):
 
 class RandomDatasetGenerator(Dataset):
     def __init__(self,sample_shape,stats_mu=0.0,stats_std=1.0,limit=1000,transform=None,train=True,
-                 as_pil=True,seed=0):
+                 as_pil=True,seed=0,truncated=True):
         super(RandomDatasetGenerator,self).__init__()
         self.rnd_generator=torch.Generator()
         self.len=limit
@@ -334,6 +334,7 @@ class RandomDatasetGenerator(Dataset):
         self.train=train
         self.initial_seed_modifier=seed
         self.transform=None
+        self.truncate_samples=truncated
         if as_pil:
             self.transform = torchvision.transforms.ToPILImage()
         self.transform=transform_compose_maybe_none(self.transform,transform)
@@ -346,6 +347,11 @@ class RandomDatasetGenerator(Dataset):
 
         self.rnd_generator.manual_seed(seed)
         sample=torch.randn(self.sample_shape,generator=self.rnd_generator).mul_(self.stats_std).add_(self.stats_mu)
+        if self.truncate_samples:
+            min_std_inv=1/min(self.stats_std)
+            max_number=(1-min(self.stats_mu))*min_std_inv
+            min_number=-max(self.stats_mu)*min_std_inv
+            sample.clamp_(min_number.item(),max_number.item())
         if self.transform:
             sample=self.transform(sample)
 

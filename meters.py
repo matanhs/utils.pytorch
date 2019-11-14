@@ -18,11 +18,11 @@ class AverageMeter(object):
     def update(self, val, n=1):
         self.val = val
         self.sum += val * n
-        self.sum_p2 += n * val**2
+        self.sum_p2 += n * (val**2)
         self.count += n
         self.avg = self.sum / self.count
         if self.count > 1:
-            self.var = (self.sum_p2 - self.avg**2)/(self.count-1)
+            self.var = (self.sum_p2 - (self.sum**2)/self.count)/(self.count-1)
 
 
 class OnlineMeter(object):
@@ -106,3 +106,37 @@ class AccuracyMeter(object):
     @property
     def avg_error(self):
         return {n: 100. - meter.avg for (n, meter) in self._meters.items()}
+
+class ConfusionMeter(AccuracyMeter):
+    """Computes and stores the average and current topk accuracy"""
+
+    def __init__(self, topk=(1,),nclasses=1000):
+        super().__init__(topk)
+        self.nclasses = nclasses
+        self.reset()
+
+    def reset(self):
+        self._confusion_matrix =None
+        super().reset()
+
+    def update(self, output, target):
+        if self._confusion_matrix is None:
+            self._confusion_matrix = torch.zeros(self.nclasses, self.nclasses)
+        pred = output.argmax(1)
+
+        for p,t in zip(pred.view(-1),target.view(-1)):
+            self._confusion_matrix[t.item(), p.item()] += 1
+
+        super().update(output,target)
+
+    @property
+    def confusion(self):
+        return self._confusion_matrix.clone()
+
+    @property
+    def confusion_normlized(self):
+        return self._confusion_matrix / self._confusion_matrix.sum(1)
+
+    @property
+    def per_class_accuracy(self):
+        return self._confusion_matrix.diag() / self._confusion_matrix.sum(1)

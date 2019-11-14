@@ -164,3 +164,10 @@ def search_absorbe_bn(model, prev=None, remove_bn=True, verbose=False,keep_modif
                 absorb_bn(prev, m, remove_bn=remove_bn, verbose=verbose,keep_modifiers=keep_modifiers)
             search_absorbe_bn(m, remove_bn=remove_bn, verbose=verbose,keep_modifiers=keep_modifiers)
             prev = m
+
+def freeze_model_bn(model):
+    with torch.no_grad():
+        for m in model.children():
+            if is_bn(m):
+                m.eval()
+            freeze_model_bn(m)

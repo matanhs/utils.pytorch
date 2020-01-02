@@ -44,13 +44,13 @@ class MixUp(nn.Module):
         y_mix = y.index_select(self.batch_dim, idx)
         return self.mix(y, y_mix)
 
-    def forward(self, x=None,sample = None,target=None):
+    def forward(self, x=None,sample = None,target=None,n_class=None):
         if sample is not None:
             if sample[1] > x.size(0):
                 sample[1] = x.size(0)
             self.sample(*sample)
         if target is not None:
-            return self.mix_target(target)
+            return self.mix_target(target,n_class)
         if not self.training or \
             self.mix_values is None or\
                 self.mix_values is None:

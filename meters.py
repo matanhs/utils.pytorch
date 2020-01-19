@@ -13,7 +13,8 @@ class AverageMeter(object):
         self.sum = 0
         self.sum_p2 = 0
         self.count = 0
-        self.var = 0
+        self._var = 0
+        self._var_count = 0
 
     def update(self, val, n=1):
         self.val = val
@@ -21,8 +22,18 @@ class AverageMeter(object):
         self.sum_p2 += n * (val**2)
         self.count += n
         self.avg = self.sum / self.count
-        if self.count > 1:
-            self.var = (self.sum_p2 - (self.sum**2)/self.count)/(self.count-1)
+
+
+    @property
+    def var(self):
+        if self.count > 1 and self.count>self._var_count:
+            self._var_count=self.count
+            self._var = (self.sum_p2 - (self.sum**2)/self.count)/(self.count-1)
+        return self._var
+
+    @property
+    def std(self):
+        return self.var**0.5
 
 
 class OnlineMeter(object):

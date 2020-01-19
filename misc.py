@@ -105,6 +105,25 @@ class View(nn.Module):
         return input.view(*self.shape)
 
 
+class LambdaBaseModule(nn.Module):
+    def __init__(self,name=None):
+        super().__init__()
+        self._name=name or type(self).__name__
+
+    def _get_name(self):
+        return self._name
+
+def get_lambda_module_class(fn,name=None):
+    class LambdaModule(LambdaBaseModule):
+        def __init__(self):
+            super().__init__(name)
+            self.fn = fn
+        def forward(self, *args, **kwargs):
+            return self.fn(*args, **kwargs)
+
+
+    return LambdaModule
+
 import math
 import numbers
 import torch

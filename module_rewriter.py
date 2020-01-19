@@ -10,7 +10,7 @@ class ReWriter():
     _BASIC_MATCHER_FN=lambda C: lambda m,n: isinstance(m, C)
 
     def __init__(self,**config):
-        self._verbose=config.get('verbose',1)
+        self._verbose=config.get('verbose',0)
         self._fallback_matchers = [type(self)._BASIC_MATCHER_FN(C) for C in type(self)._SUPPORTED_MODULES]
         self._default_cfgs = OrderedDict()
 
@@ -34,18 +34,17 @@ class ReWriter():
                     long_name = cn
                 else:
                     long_name = f'{parent_name}.{cn}'
-                print(long_name)
+                #print(long_name)
                 match_found = 0
                 for matcher_fn,builder_fn in self.group_fns.values():
                     if matcher_fn(c,long_name):
                         if self._verbose>1:
-                            print('matched',c,builder_fn.source_class,signature(builder_fn).parameters.keys())
+                            print('matched',c,signature(c.__class__.__init__).parameters.keys())
                         match_found=1
-                        replace_children_dict[cn]=type(self)._gen_substitute_module(c,builder_fn)
-                        ## todo got the replacement module, need to set it instead of the original
+                        replace_children_dict[cn]=builder_fn(c)
                         break
 
-                ## note: assumes matched modules children are replaced by the builder_fn so we dont need to
+                ## note: assumes matched module's children are replaced by the builder_fn so we dont need to
                 # handle them in the recursion
                 if not match_found:
                     _recurse_module(c, long_name)
@@ -62,7 +61,7 @@ class ReWriter():
     # however it is best to pass responsibility to the builder_fn to correctly build the
     # new module
     @staticmethod
-    def _gen_substitute_module(m,builder_fn):
+    def _gen_substitute_module(m,init_module_fn):
         ## assume builder_fn constructs a valid subclass of the given module
         # todo: consider passing responsibility for attrs/param/buffers to the builder_fn
         pks = signature(m.__class__.__init__).parameters.keys()
@@ -71,7 +70,10 @@ class ReWriter():
             if param_key=='self':
                 continue
             kwargs[param_key]=getattr(m,param_key) if param_key!='bias' else getattr(m,param_key) is not None
-        new_module=builder_fn(**kwargs)
+        new_module=init_module_fn(**kwargs)
         new_module._parameters=deepcopy(m._parameters)
         new_module._buffers=deepcopy(m._parameters)
         return new_module
+
+    def gen_builder_fn(self,init_module_fn):
+        return lambda target_module_instance: type(self)._gen_substitute_module(target_module_instance,init_module_fn)

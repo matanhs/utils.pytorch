@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import logging
+from copy import deepcopy
+from collections import OrderedDict
 
 _ABSORBING_CLASSES = [torch.nn.modules.conv.Conv2d, torch.nn.modules.linear.Linear]
 def remove_bn_params(bn_module):
@@ -164,6 +166,18 @@ def search_absorbe_bn(model, prev=None, remove_bn=True, verbose=False,keep_modif
                 absorb_bn(prev, m, remove_bn=remove_bn, verbose=verbose,keep_modifiers=keep_modifiers)
             search_absorbe_bn(m, remove_bn=remove_bn, verbose=verbose,keep_modifiers=keep_modifiers)
             prev = m
+
+def get_bn_params(model):
+    bn_stats_dict=OrderedDict()
+    with torch.no_grad():
+        for trace_name,m in model.named_modules():
+            if is_bn(m):
+                bn_stats_dict[trace_name]=deepcopy(m.state_dict())
+                for p in bn_stats_dict[trace_name].values():
+                    p.requires_grad=False
+
+    return bn_stats_dict
+
 
 def freeze_model_bn(model):
     with torch.no_grad():

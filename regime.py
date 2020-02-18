@@ -10,6 +10,20 @@ def eval_func(f, x):
     return f(x)
 
 
+def test_step_lambda(lambda_string,n_steps=10,plot=True):
+    lrs=[eval_func(lambda_string, i)['lr'] for i in range(n_steps)]
+    if plot:
+        from matplotlib import pyplot as plt
+        plt.plot(lrs)
+    else:
+        return lrs
+
+
+def linear_lr(lr0, lrT, T0, T):
+    rate = (lrT - lr0) / (T-T0)
+    return f"lambda t: {{'lr': {lr0} - (t-{T0}) * {rate}}}"
+
+
 def ramp_up_lr(lr0, lrT, T):
     rate = (lrT - lr0) / T
     return "lambda t: {'lr': %s + t * %s}" % (lr0, rate)
@@ -33,9 +47,9 @@ def lr_drops(lr0, lrT,T0, T,n_drops):
     return "lambda t: {'lr': max(%s * %s ** ((t-%s)//%s),%s)}" % (lr0, factor,T0,steps_per_drop,lrT)
 
 
-def cosine_anneal_lr(lr0,lr_T,T0,T,n_drops=-1):
+def cosine_anneal_lr(lr0,lr_T,T0,T,n_drops=None):
     delta_T=T-T0
-    if n_drops>0:
+    if n_drops:
         steps_per_drop=delta_T//(n_drops+1)
         return f"lambda t: {{'lr': {lr_T} + ({lr0} - {lr_T})*(1+math.cos(math.pi*((t-{T0})//{steps_per_drop})/{n_drops}))/2}}"
     else:

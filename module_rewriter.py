@@ -1,17 +1,65 @@
-from utils.partial_class import partial_class
 from inspect import signature
 from copy import deepcopy
 from collections import OrderedDict
+from abc import abstractmethod, ABCMeta
+import warnings
+
+
+class BaseConfigurationGroup():
+    def __init__(self,name,matcher,builder=None):
+        if not isinstance(matcher,BaseMatcher):
+            warnings.warn('matcher is not a subclass of BaseMatcher')
+        self.name=name
+        self.matcher=matcher
+        self.builder=builder
+
+class BaseMatcher(metaclass=ABCMeta):
+    @abstractmethod
+    def __call__(self, module, trace_name, **kwargs):
+        pass
+
+class BasicTypeMatcher(BaseMatcher):
+    def __init__(self, target_class):
+        self.target_class = target_class
+
+    def __call__(self, module, trace_name, **kwargs):
+        return isinstance(module, self.target_class)
+
+class FirstNMatcher(BaseMatcher):
+    def __init__(self,limit,matcher):
+        self.matcher = matcher
+        self.limit = limit
+        self.invoke_count = 0
+
+    def __call__(self, module, trace_name):
+        if self.invoke_count < self.limit:
+            match = self.matcher(module, trace_name)
+            if match:
+                self.invoke_count+=1
+                return True
+        return False
+
+class ExactAttrMatcher(BaseMatcher):
+    def __init__(self,target_class,kw_attributes):
+        assert isinstance(kw_attributes, dict),'please provide a dictionary of attributes and values'
+        self.attrs_to_match = kw_attributes
+        self.target_class = target_class
+
+    def __call__(self, module, trace_name, **kwargs):
+        if isinstance(module, self.target_class):
+            for attr,value in self.attrs_to_match.items():
+                if getattr(module,attr) != value:
+                    break
+            return True
+        return False
 
 ## this is a basic rewriter class that can be extended for general purpose module replacement
 class ReWriter():
     _SUPPORTED_MODULES = []
 
-    _BASIC_MATCHER_FN=lambda C: lambda m,n: isinstance(m, C)
-
     def __init__(self,**config):
         self._verbose=config.get('verbose',0)
-        self._fallback_matchers = [type(self)._BASIC_MATCHER_FN(C) for C in type(self)._SUPPORTED_MODULES]
+        #self._fallback_matchers = [BasicTypeMatcher(C) for C in type(self)._SUPPORTED_MODULES]
         self._default_cfgs = OrderedDict()
 
         cfg_groups=config.get('cfg_groups',OrderedDict())
@@ -35,12 +83,12 @@ class ReWriter():
                 else:
                     long_name = f'{parent_name}.{cn}'
                 #print(long_name)
-                match_found = 0
-                for matcher_fn,builder_fn in self.group_fns.values():
+                match_found = False
+                for group_name,(matcher_fn,builder_fn) in self.group_fns.items():
                     if matcher_fn(c,long_name):
-                        if self._verbose>1:
-                            print('matched',c,signature(c.__class__.__init__).parameters.keys())
-                        match_found=1
+                        if self._verbose>0:
+                            print(f'matched {c}: {signature(c.__class__.__init__).parameters.keys()} with {group_name} group')
+                        match_found=True
                         replace_children_dict[cn]=builder_fn(c)
                         break
 
@@ -50,7 +98,7 @@ class ReWriter():
                     _recurse_module(c, long_name)
 
             if len(replace_children_dict)>0:
-                if self._verbose > 0:
+                if self._verbose > 1:
                     print(f'replacing {long_name} modules',replace_children_dict)
                 for cn, new_module in replace_children_dict.items():
                     m._modules[cn]=new_module

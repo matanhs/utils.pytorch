@@ -49,9 +49,8 @@ class ExactAttrMatcher(BaseMatcher):
         if isinstance(module, self.target_class):
             for attr,value in self.attrs_to_match.items():
                 if getattr(module,attr) != value:
-                    break
+                    return False
             return True
-        return False
 
 ## this is a basic rewriter class that can be extended for general purpose module replacement
 class ReWriter():

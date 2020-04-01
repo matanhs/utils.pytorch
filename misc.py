@@ -222,8 +222,13 @@ class GaussianSmoothing(nn.Module):
 # input = torch.rand(1, 3, 100, 100)
 # input = F.pad(input, (2, 2, 2, 2), mode='reflect')
 # output = smoothing(input)
+import re
+def matcher_fn(target,regex=r'.*'):
+    #  r"(res5.*)|(bn5.*)|(shortcut\_.*)"
+    return bool(re.fullmatch(regex, target))
+
 class Recorder():
-    _RECORDING_MODES=['inputs','output']
+    _RECORDING_MODES=['inputs','outputs']
     _DEVICE_MODES=['same','cpu']
 
     def __init__(self,model,recording_mode=['inputs'],
@@ -233,7 +238,8 @@ class Recorder():
                  grad_in_fn=None, grad_out_fn=None,
                  activation_reducer_fn=None,grad_reducer_fn=None,
                  include_gradients=False,
-                 device_mode='cpu'):
+                 device_mode='cpu',
+                 recursive=False):
         Recorder._assert_supported_static(recording_mode,'_RECORDING_MODES')
         Recorder._assert_supported_static(device_mode,'_DEVICE_MODES')
         Recorder._assert_callable_or_none([input_fn,output_fn,grad_in_fn,grad_out_fn,
@@ -241,44 +247,62 @@ class Recorder():
         self.record = OrderedDict()
         self.recording_mode = recording_mode
         self.device_modifier = lambda v: v if device_mode == 'same' else v.detach().cpu()
-        for trace_name,m in model.named_children():
+        self.tag=None
+        self.master_record_enable=True
+        if recursive:
+            generator = model.named_modules
+        else:
+            generator = model.named_children
+        for trace_name,m in generator():
             if include_matcher_fn(trace_name,m) and not exclude_matcher_fn(trace_name,m):
-                m.register_forward_hook(self.recording_hook_generator(trace_name,input_fn,output_fn,
+                m.register_forward_hook(self.recording_hook_generator(trace_name+'_forward',input_fn,output_fn,
                                                                       activation_reducer_fn))
                 if include_gradients:
-                    m.register_backward_hook(self.recording_hook_generator(trace_name,grad_in_fn,grad_out_fn,grad_reducer_fn))
+                    m.register_backward_hook(self.recording_hook_generator(trace_name+'_grad',grad_in_fn,grad_out_fn,grad_reducer_fn))
 
     @staticmethod
     def _assert_supported_static(i,static_attr):
-        if hasattr(i,'__iter__'):
-            assert all([a in getattr(Recorder,static_attr) for a in i])
+        supported_list=getattr(Recorder,static_attr,[])
+        if type(i)==list:
+            assert all([a in supported_list for a in i])
         else:
-            assert i in getattr(Recorder,static_attr)
+            assert i in supported_list
 
     @staticmethod
     def _assert_callable_or_none(candidates):
         assert all([callable(fn) or fn is None for fn in candidates])
 
-    def stack_new_entries(self,k,v,reducer_fn=None):
-            if k in self.record:
-                if reducer_fn:
-                    self.record[k]=(self.record[k],v)
-                else:
-                    self.record[k] = torch.cat([self.record[k],self.device_modifier(v)])
+
+
+    def insert(self, k, v, reducer_fn=None):
+        k_=k+f'-@{self.tag}' if self.tag else k
+
+        if k_ in self.record:
+            if reducer_fn:
+                self.record[k_]=(self.record[k_],v)
             else:
-                self.record[k] = self.device_modifier(v)
+                self.record[k_] = torch.cat([self.record[k_],self.device_modifier(v)])
+        else:
+            self.record[k_] = self.device_modifier(v)
 
     def recording_hook_generator(self,trace_name,in_fn=None,out_fn=None,reducer_fn=None):
         def recorder_hook(m, inputs, output):
+            if not self.master_record_enable:
+                return
             if 'inputs' in self.recording_mode:
                 for i,inp in enumerate(inputs):
-                    self.stack_new_entries(trace_name + '_input:{i}',inp,reducer_fn)
+                    self.insert(trace_name + f'_input:{i}', inp, reducer_fn)
                 if in_fn:
-                    in_fn(inputs)
-                    self.stack_new_entries(trace_name+'_input_fn',reducer_fn)
-            if 'output' in self.recording_mode:
-                self.stack_new_entries(trace_name + '_output',output,reducer_fn)
+                    in_meta = in_fn(inputs)
+                    self.insert(trace_name + '_input_fn', in_meta, reducer_fn)
+            if 'outputs' in self.recording_mode:
+                self.insert(trace_name + '_output', output, reducer_fn)
                 if out_fn:
-                    out_fn(inputs)
-                    self.stack_new_entries(trace_name+'_output_fn',reducer_fn)
-            return recorder_hook
+                    out_meta = out_fn(inputs)
+                    self.insert(trace_name + '_output_fn', out_meta, reducer_fn)
+
+        return recorder_hook
+
+    def dump_record(self,root='.',name='record.pth'):
+        import os
+        torch.save(self.record,os.path.join(root,name))

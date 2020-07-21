@@ -228,8 +228,10 @@ def matcher_fn(target,regex=r'.*'):
     return bool(re.fullmatch(regex, target))
 
 class Recorder():
-    _RECORDING_MODES=['inputs','outputs']
-    _DEVICE_MODES=['same','cpu']
+    _RECORD_OUTPUT_MODE = ['outputs', 'outputs_modifier']
+    _RECORD_INPUT_MODE = ['inputs', 'inputs_modifier']
+    _ALL_RECORDING_MODES = _RECORD_INPUT_MODE + _RECORD_OUTPUT_MODE
+    _SUPPORTED_DEVICE_MODES = ['same', 'cpu']
 
     def __init__(self,model,recording_mode=['inputs'],
                  exclude_matcher_fn=lambda n,m: False,
@@ -238,17 +240,21 @@ class Recorder():
                  grad_in_fn=None, grad_out_fn=None,
                  activation_reducer_fn=None,grad_reducer_fn=None,
                  include_gradients=False,
-                 device_mode='cpu',
+                 device_modifier='cpu',
                  recursive=False):
-        Recorder._assert_supported_static(recording_mode,'_RECORDING_MODES')
-        Recorder._assert_supported_static(device_mode,'_DEVICE_MODES')
+        Recorder._assert_supported_static(recording_mode,'_ALL_RECORDING_MODES')
         Recorder._assert_callable_or_none([input_fn,output_fn,grad_in_fn,grad_out_fn,
                                            activation_reducer_fn,grad_reducer_fn])
         self.record = OrderedDict()
         self.recording_mode = recording_mode
-        self.device_modifier = lambda v: v if device_mode == 'same' else v.detach().cpu()
-        self.tag=None
-        self.master_record_enable=True
+        if callable(device_modifier):
+            self.device_modifier = device_modifier
+        else:
+            Recorder._assert_supported_static(device_modifier, '_SUPPORTED_DEVICE_MODES')
+            self.device_modifier = lambda v: v if device_modifier == 'same' else v.cpu()
+
+        self.tag = None
+        self.master_record_enable = True
         if recursive:
             generator = model.named_modules
         else:
@@ -272,14 +278,11 @@ class Recorder():
     def _assert_callable_or_none(candidates):
         assert all([callable(fn) or fn is None for fn in candidates])
 
-
-
     def insert(self, k, v, reducer_fn=None):
         k_=k+f'-@{self.tag}' if self.tag else k
-
         if k_ in self.record:
             if reducer_fn:
-                self.record[k_]=(self.record[k_],v)
+                self.record[k_]=reducer_fn(self.record[k_],self.device_modifier(v))
             else:
                 self.record[k_] = torch.cat([self.record[k_],self.device_modifier(v)])
         else:
@@ -289,16 +292,22 @@ class Recorder():
         def recorder_hook(m, inputs, output):
             if not self.master_record_enable:
                 return
+
             if 'inputs' in self.recording_mode:
                 for i,inp in enumerate(inputs):
                     self.insert(trace_name + f'_input:{i}', inp, reducer_fn)
-                if in_fn:
-                    in_meta = in_fn(inputs)
+
+            if in_fn:
+                in_meta = in_fn(trace_name,m,inputs)
+                if 'inputs_modifier' in self.recording_mode:
                     self.insert(trace_name + '_input_fn', in_meta, reducer_fn)
+
             if 'outputs' in self.recording_mode:
                 self.insert(trace_name + '_output', output, reducer_fn)
-                if out_fn:
-                    out_meta = out_fn(inputs)
+
+            if out_fn:
+                out_meta = out_fn(trace_name,m,output)
+                if 'outputs_modifier' in self.recording_mode:
                     self.insert(trace_name + '_output_fn', out_meta, reducer_fn)
 
         return recorder_hook
@@ -306,3 +315,19 @@ class Recorder():
     def dump_record(self,root='.',name='record.pth'):
         import os
         torch.save(self.record,os.path.join(root,name))
+
+
+def layer_stats_hook_dict(stat_dict, trace_name, device, pre_bn=True):
+    def stat_record(m,inputs , outputs):
+        target_activations = inputs if pre_bn else [outputs.clone()]
+        sum = target_activations[0].sum((0, 2, 3))
+        sum_p2 = target_activations[0].pow(2).sum((0, 2, 3))
+        n= target_activations[0][:, 0, :, :].numel()
+        _sum=sum.to(device)
+        _sum_p2=sum_p2.to(device)
+        if trace_name not in stat_dict:
+            stat_dict[trace_name]=(_sum, _sum_p2, n)
+        else:
+            sum_, sum_p2_, n_ = stat_dict[trace_name]
+            stat_dict[trace_name]=(_sum + sum_, _sum_p2 + sum_p2_, n + n_)
+    return stat_record

@@ -39,27 +39,56 @@ class AverageMeter(object):
 class OnlineMeter(object):
     """Computes and stores the average and variance/std values of tensor"""
 
-    def __init__(self):
+    def __init__(self,batched=False,track_cov=False):
         self.mean = torch.FloatTensor(1).fill_(-1)
         self.M2 = torch.FloatTensor(1).zero_()
         self.count = 0.
         self.needs_init = True
+        self.batched = batched
+        self.track_covariance = track_cov
 
     def reset(self, x):
-        self.mean = x.new(x.size()).zero_()
-        self.M2 = x.new(x.size()).zero_()
+        size=x[0].size()
+        if self.track_covariance:
+            cov_size = torch.prod(torch.tensor(size))
+            self.xtx = x.new(cov_size, cov_size).zero_()
+
+        self.mean = x.new(size).zero_()
+        self.M2 = x.new(size).zero_()
         self.count = 0.
         self.needs_init = False
 
     def update(self, x):
         self.val = x
+        if not self.batched:
+            x_ = x.unsqueeze(0)
+        else:
+            x_ = x
+
         if self.needs_init:
             self.reset(x)
-        self.count += 1
-        delta = x - self.mean
+
+        num_observations = x_.shape[0]
+        self.count += num_observations
+        delta = x_.sum(0) - num_observations * self.mean
         self.mean.add_(delta / self.count)
-        delta2 = x - self.mean
-        self.M2.add_(delta * delta2)
+
+        ## calc centered sum squares
+        centered_x = x_ - self.mean
+        if self.track_covariance:
+            x_2d = centered_x.view(num_observations,-1)
+            # outer product sum over all samples
+            self.xtx += x_2d.transpose(1,0).matmul(x_2d)
+        # keep this for now even if covariance if calculated
+        delta_p2 = (centered_x * centered_x).sum(0)
+        # reduce sum batch dimension
+        self.M2.add_(delta_p2)
+
+    @property
+    def cov(self):
+        if not self.track_covariance or self.count < 2:
+            return self.xtx.clone().zero_()
+        return self.xtx / (self.count - 1)
 
     @property
     def var(self):
@@ -151,3 +180,41 @@ class ConfusionMeter(AccuracyMeter):
     @property
     def per_class_accuracy(self):
         return self._confusion_matrix.diag() / self._confusion_matrix.sum(1)
+
+### a dictionary of meters, used in conjunction with CorrCriterionWrapper stats recorder to aggregate statistics
+# (due to OnlineMeter restriction only expects a single observation at a time by default)
+from _collections import OrderedDict
+class MeterDict(OrderedDict):
+    def __init__(self, online_meter_class=OnlineMeter,meter_factory=None):
+        super().__init__()
+        self.online_meter_class = online_meter_class
+        self.meter_factory = meter_factory
+
+    def __setitem__(self, key, value):
+        if not isinstance(value, self.online_meter_class):
+            meter_val = self.meter_factory(key,value) if self.meter_factory else self.online_meter_class()
+            meter_val.update(value.detach())
+            value = meter_val
+        super().__setitem__(key, value)
+
+    def update(self, *args, **kwargs):
+        def _update(k_, v_):
+            if k_ not in self.keys():
+                self.__setitem__(k_, v_)
+            else:
+                v_old = self.__getitem__(k_)
+                v_old.update(v_.detach())
+
+        for other in args:
+            if hasattr(other, 'keys'):
+                for k in other.keys():
+                    _update(k, other[k])
+            else:
+                for k, v in other:
+                    _update(k, v)
+
+        if kwargs:
+            self.update(kwargs)
+
+    def __repr__(self):
+        return f'{dict([(k, v.mean) for (k, v) in self.items()])}'

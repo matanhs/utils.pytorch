@@ -246,6 +246,7 @@ class Recorder():
         Recorder._assert_callable_or_none([input_fn,output_fn,grad_in_fn,grad_out_fn,
                                            activation_reducer_fn,grad_reducer_fn])
         self.record = OrderedDict()
+        self.tracked_modules = OrderedDict()
         self.recording_mode = recording_mode
         if callable(device_modifier):
             self.device_modifier = device_modifier
@@ -261,6 +262,7 @@ class Recorder():
             generator = model.named_children
         for trace_name,m in generator():
             if include_matcher_fn(trace_name,m) and not exclude_matcher_fn(trace_name,m):
+                self.tracked_modules[trace_name] = m
                 m.register_forward_hook(self.recording_hook_generator(trace_name+'_forward',input_fn,output_fn,
                                                                       activation_reducer_fn))
                 if include_gradients:

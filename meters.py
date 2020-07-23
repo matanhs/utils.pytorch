@@ -66,12 +66,13 @@ class OnlineMeter(object):
             x_ = x
 
         if self.needs_init:
-            self.reset(x)
+            self.reset(x_)
 
         num_observations = x_.shape[0]
         self.count += num_observations
-        delta = x_.sum(0) - num_observations * self.mean
-        self.mean.add_(delta / self.count)
+        delta = x_.mean(0) - self.mean
+        scale = num_observations/self.count
+        self.mean.add_(delta.mul_(scale))
 
         ## calc centered sum squares
         centered_x = x_ - self.mean
@@ -87,7 +88,7 @@ class OnlineMeter(object):
     @property
     def cov(self):
         if not self.track_covariance or self.count < 2:
-            return self.xtx.clone().zero_()
+            return 0
         return self.xtx / (self.count - 1)
 
     @property

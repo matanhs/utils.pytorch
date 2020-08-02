@@ -245,6 +245,8 @@ class Recorder():
         Recorder._assert_supported_static(recording_mode,'_ALL_RECORDING_MODES')
         Recorder._assert_callable_or_none([input_fn,output_fn,grad_in_fn,grad_out_fn,
                                            activation_reducer_fn,grad_reducer_fn])
+        self._forward_hooks = []
+        self._backward_hooks = []
         self.record = OrderedDict()
         self.tracked_modules = OrderedDict()
         self.recording_mode = recording_mode
@@ -263,10 +265,11 @@ class Recorder():
         for trace_name,m in generator():
             if include_matcher_fn(trace_name,m) and not exclude_matcher_fn(trace_name,m):
                 self.tracked_modules[trace_name] = m
-                m.register_forward_hook(self.recording_hook_generator(trace_name+'_forward',input_fn,output_fn,
-                                                                      activation_reducer_fn))
+                self._forward_hooks.append(m.register_forward_hook(
+                    self.recording_hook_generator(trace_name+'_forward',input_fn,output_fn, activation_reducer_fn)))
                 if include_gradients:
-                    m.register_backward_hook(self.recording_hook_generator(trace_name+'_grad',grad_in_fn,grad_out_fn,grad_reducer_fn))
+                    self._backward_hooks.append(m.register_backward_hook(
+                        self.recording_hook_generator(trace_name+'_grad',grad_in_fn,grad_out_fn,grad_reducer_fn)))
 
     @staticmethod
     def _assert_supported_static(i,static_attr):
@@ -318,6 +321,10 @@ class Recorder():
         import os
         torch.save(self.record,os.path.join(root,name))
 
+    def remove_model_hooks(self):
+        hooks = self._backward_hooks+self._forward_hooks
+        for hook in hooks:
+            hook.remove()
 
 def layer_stats_hook_dict(stat_dict, trace_name, device, pre_bn=True):
     def stat_record(m,inputs , outputs):

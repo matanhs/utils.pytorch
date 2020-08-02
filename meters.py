@@ -38,23 +38,47 @@ class AverageMeter(object):
 
 class OnlineMeter(object):
     """Computes and stores the average and variance/std values of tensor"""
-
-    def __init__(self,batched=False,track_cov=False):
+    def __init__(self, batched=False, track_cov=False, track_percentiles=False, target_percentiles=None,
+                 per_channel=False, number_edge_samples=0):
         self.mean = torch.FloatTensor(1).fill_(-1)
         self.M2 = torch.FloatTensor(1).zero_()
         self.count = 0.
         self.needs_init = True
         self.batched = batched
         self.track_covariance = track_cov
+        self.track_percentiles = track_percentiles
+        self.per_channel = per_channel
+        self.target_percentiles = target_percentiles
+        self.number_edge_samples = number_edge_samples
 
     def reset(self, x):
-        size=x[0].size()
-        if self.track_covariance:
-            cov_size = torch.prod(torch.tensor(size))
-            self.xtx = x.new(cov_size, cov_size).zero_()
+        self.sample_shape = x[0].size()
+        if self.per_channel:
+            self.num_variables = self.sample_shape[0]
+        else:
+            self.num_variables = x[0].numel()
 
-        self.mean = x.new(size).zero_()
-        self.M2 = x.new(size).zero_()
+        if self.track_percentiles:
+            self.percentiles = AverageMeter()
+            if self.number_edge_samples > 0:
+                if self.per_channel:
+                    perc_shape = (self.number_edge_samples, self.num_variables)
+                else:
+                    perc_shape = (self.number_edge_samples,)+ tuple(self.sample_shape)
+                perc_shape = torch.Size(perc_shape)
+                self.max_values_observed = x.new(perc_shape).fill_(-float("inf"))
+                self.min_values_observed = x.new(perc_shape).fill_(float("inf"))
+
+        if self.per_channel:
+            self.mean = x.new(self.num_variables).zero_()
+            self.M2 = x.new(self.num_variables).zero_()
+        else:
+            self.mean = x.new(self.sample_shape).zero_()
+            self.M2 = x.new(self.sample_shape).zero_()
+
+        if self.track_covariance:
+            self.cov = x.new(self.num_variables, self.num_variables).zero_()
+
         self.count = 0.
         self.needs_init = False
 
@@ -68,28 +92,54 @@ class OnlineMeter(object):
         if self.needs_init:
             self.reset(x_)
 
-        num_observations = x_.shape[0]
+        num_observations = x_.numel()//self.num_variables
         self.count += num_observations
+
+        if self.per_channel:
+            # add spatial elements to the first dimension
+            x_ = x_.transpose(1,0).contiguous().view(self.num_variables,num_observations).transpose(1,0)
+
         delta = x_.mean(0) - self.mean
         scale = num_observations/self.count
         self.mean.add_(delta.mul_(scale))
 
         ## calc centered sum squares
         centered_x = x_ - self.mean
-        if self.track_covariance:
-            x_2d = centered_x.view(num_observations,-1)
-            # outer product sum over all samples
-            self.xtx += x_2d.transpose(1,0).matmul(x_2d)
-        # keep this for now even if covariance if calculated
-        delta_p2 = (centered_x * centered_x).sum(0)
+        # calc variance for now even if covariance if calculated
         # reduce sum batch dimension
+        delta_p2 = (centered_x * centered_x).sum(0)
+        # update second moment accumulator
         self.M2.add_(delta_p2)
+        if self.track_covariance:
+            if not self.per_channel:
+                #flatten the variable samples for covariance computation,
+                centered_x = centered_x.view(num_observations,self.num_variables)
+            new_covariance = centered_x.transpose(1,0).matmul(centered_x).div_(num_observations)
+            delta = new_covariance.sub_(self.cov)
+            # update mean covariance
+            scale = num_observations / self.count
+            self.cov.add_(delta.mul_(scale))
 
-    @property
-    def cov(self):
-        if not self.track_covariance or self.count < 2:
-            return 0
-        return self.xtx / (self.count - 1)
+        if self.track_percentiles:
+            x_sorted = x_.sort(0)[0]
+            ## note that percentiles are observed only within a given batch
+            # if the number of observation is too small to represent the requested percentiles the result will be
+            # value duplication!
+            percentile_ids = torch.repeat_interleave(
+                torch.round(self.target_percentiles * (num_observations - 1)).long()[:, None],
+                self.num_variables, 1).to(x_.device)
+            if not self.per_channel:
+                percentile_ids = percentile_ids.reshape(((percentile_ids.shape[0],)+self.sample_shape))
+            # update averege meter that approximates the percentiles (tractable statistic)
+            self.percentiles.update(x_sorted.gather(0, percentile_ids))
+            self.min_values_observed = torch.cat([self.min_values_observed,
+                                                  x_sorted[:self.number_edge_samples]]).topk(self.number_edge_samples,
+                                                                                             dim=0,sorted=True,
+                                                                                             largest=False)[0]
+            self.max_values_observed = torch.cat([self.max_values_observed,
+                                                  x_sorted[-self.number_edge_samples:]]).topk(self.number_edge_samples,
+                                                                                              dim=0, sorted=True,
+                                                                                              largest=True)[0]
 
     @property
     def var(self):
@@ -101,6 +151,11 @@ class OnlineMeter(object):
     def std(self):
         return self.var().sqrt()
 
+    def get_distribution_histogram(self):
+        quantiles = torch.cat([self.min_values_observed, self.percentiles.avg, self.max_values_observed])
+        edge_percentiles = torch.arange(1,self.number_edge_samples + 1) /self.count
+        percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - edge_percentiles])
+        return percentiles,quantiles
 
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""
@@ -219,3 +274,20 @@ class MeterDict(OrderedDict):
 
     def __repr__(self):
         return f'{dict([(k, v.mean) for (k, v) in self.items()])}'
+
+
+if __name__ == '__main__':
+    import numpy as np
+    ## test only per channel mode
+    m=OnlineMeter(batched=True,track_cov=True,track_percentiles=True,percentiles=torch.tensor([0.,1.]),per_channel=True,number_edge_samples=1)
+    x= torch.randn(100000,8,3,3)
+    cov_np=np.cov(x.transpose(1, 0).contiguous().view(100000 * 9, 8).transpose(1, 0).numpy())
+    var_np=np.var(x.numpy(),(0,2,3))
+    for i in range(x.shape[0]//1000):
+        m.update(x[i*1000:(i+1)*1000])
+    diff = 0
+    for np_ref,meter_out in [[cov_np,m.cov],[np.diag(cov_np),m.var],[var_np,m.var],[var_np,torch.diag(m.cov)]]:
+        for diff_reduce_fn in [np.median,np.max,np.mean]:
+            diff = diff_reduce_fn(np.abs(np_ref-meter_out.numpy()))
+
+    pass

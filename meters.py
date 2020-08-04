@@ -152,13 +152,13 @@ class OnlineMeter(object):
         return self.var().sqrt()
 
     def get_distribution_histogram(self,edge_subsample_rate=10):
-        edge_percentiles_ids_low = torch.arange(0, self.number_edge_samples, edge_subsample_rate)
-        edge_percentiles_ids_high = self.number_edge_samples - reversed(edge_percentiles_ids_low) - 1
-        quantiles = torch.cat([self.min_values_observed[edge_percentiles_ids_low], self.percentiles.avg,
-                               self.max_values_observed[edge_percentiles_ids_high]])
-        edge_percentiles = (edge_percentiles_ids_low+1) /self.count
-        percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - edge_percentiles])
-        return percentiles,quantiles
+        edge_percentiles_ids = torch.arange(0, self.number_edge_samples+1, edge_subsample_rate).clamp(0,self.number_edge_samples-1)
+        quantiles = torch.cat([self.min_values_observed[edge_percentiles_ids], self.percentiles.avg,
+                               self.max_values_observed[edge_percentiles_ids]])
+        edge_percentiles = (edge_percentiles_ids+1) /self.count
+        percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - reversed(edge_percentiles)])
+        percentiles, ids = percentiles.sort(0)
+        return percentiles,quantiles[ids]
 
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""

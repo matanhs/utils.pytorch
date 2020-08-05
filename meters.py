@@ -157,8 +157,9 @@ class OnlineMeter(object):
                                self.max_values_observed[edge_percentiles_ids]])
         edge_percentiles = (edge_percentiles_ids+1) /self.count
         percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - reversed(edge_percentiles)])
-        percentiles, ids = percentiles.sort(0)
-        return percentiles,quantiles[ids]
+        percentiles = percentiles.sort(0)[0]
+        quantiles = quantiles.sort(0)[0]
+        return percentiles,quantiles
 
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""

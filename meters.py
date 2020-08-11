@@ -149,7 +149,7 @@ class OnlineMeter(object):
 
     @property
     def std(self):
-        return self.var().sqrt()
+        return self.var.sqrt()
 
     def get_distribution_histogram(self,edge_subsample_rate=10):
         edge_percentiles_ids = torch.arange(0, self.number_edge_samples+1, edge_subsample_rate).clamp(0,self.number_edge_samples-1)

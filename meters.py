@@ -132,14 +132,15 @@ class OnlineMeter(object):
                 percentile_ids = percentile_ids.reshape(((percentile_ids.shape[0],)+self.sample_shape))
             # update averege meter that approximates the percentiles (tractable statistic)
             self.percentiles.update(x_sorted.gather(0, percentile_ids))
-            self.min_values_observed = torch.cat([self.min_values_observed,
-                                                  x_sorted[:self.number_edge_samples]]).topk(self.number_edge_samples,
-                                                                                             dim=0,sorted=True,
-                                                                                             largest=False)[0]
-            self.max_values_observed = torch.cat([self.max_values_observed,
-                                                  x_sorted[-self.number_edge_samples:]]).topk(self.number_edge_samples,
-                                                                                              dim=0, sorted=True,
-                                                                                              largest=True)[0]
+            if self.number_edge_samples>0:
+                self.min_values_observed = torch.cat([self.min_values_observed,
+                                                      x_sorted[:self.number_edge_samples]]).topk(self.number_edge_samples,
+                                                                                                 dim=0,sorted=True,
+                                                                                                 largest=False)[0]
+                self.max_values_observed = torch.cat([self.max_values_observed,
+                                                      x_sorted[-self.number_edge_samples:]]).topk(self.number_edge_samples,
+                                                                                                  dim=0, sorted=True,
+                                                                                                  largest=True)[0]
 
     @property
     def var(self):
@@ -152,13 +153,20 @@ class OnlineMeter(object):
         return self.var.sqrt()
 
     def get_distribution_histogram(self,edge_subsample_rate=10):
-        edge_percentiles_ids = torch.arange(0, self.number_edge_samples+1, edge_subsample_rate).clamp(0,self.number_edge_samples-1)
-        quantiles = torch.cat([self.min_values_observed[edge_percentiles_ids], self.percentiles.avg,
-                               self.max_values_observed[edge_percentiles_ids]])
-        edge_percentiles = (edge_percentiles_ids+1) /self.count
-        percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - reversed(edge_percentiles)])
-        percentiles = percentiles.sort(0)[0]
-        quantiles = quantiles.sort(0)[0]
+        if self.number_edge_samples>0:
+            edge_percentiles_ids = torch.arange(0, self.number_edge_samples + 1,
+                                                edge_subsample_rate).clamp(0,self.number_edge_samples - 1)
+            edge_percentiles = (edge_percentiles_ids + 1) / self.count
+            # fix to remove unwanted overlap between edge and target percentiles when seen sample count is too small
+            clip_edge_overlap_at_id = (edge_percentiles < self.target_percentiles[0]).sum()
+            edge_percentiles_ids=edge_percentiles_ids[:clip_edge_overlap_at_id]
+            edge_percentiles = edge_percentiles[:clip_edge_overlap_at_id]
+            quantiles = torch.cat([self.min_values_observed[edge_percentiles_ids], self.percentiles.avg,
+                                   self.max_values_observed[edge_percentiles_ids]])
+            percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - reversed(edge_percentiles)])
+        else:
+            quantiles = self.percentiles.avg
+            percentiles = self.target_percentiles
         return percentiles,quantiles
 
 def accuracy(output, target, topk=(1,)):

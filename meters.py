@@ -107,7 +107,7 @@ class OnlineMeter(object):
         centered_x = x_ - self.mean
         # calc variance for now even if covariance if calculated
         # reduce sum batch dimension
-        delta_p2 = (centered_x * centered_x).sum(0)
+        delta_p2 = centered_x.mul_(centered_x).sum(0)
         # update second moment accumulator
         self.M2.add_(delta_p2)
         if self.track_covariance:
@@ -137,10 +137,11 @@ class OnlineMeter(object):
                                                       x_sorted[:self.number_edge_samples]]).topk(self.number_edge_samples,
                                                                                                  dim=0,sorted=True,
                                                                                                  largest=False)[0]
+                # always sort in acceding order
                 self.max_values_observed = torch.cat([self.max_values_observed,
                                                       x_sorted[-self.number_edge_samples:]]).topk(self.number_edge_samples,
-                                                                                                  dim=0, sorted=True,
-                                                                                                  largest=True)[0]
+                                                                                                  dim=0, sorted=False,
+                                                                                                  largest=True)[0].sort(0)[0]
 
     @property
     def var(self):
@@ -154,19 +155,37 @@ class OnlineMeter(object):
 
     def get_distribution_histogram(self,edge_subsample_rate=10):
         if self.number_edge_samples>0:
-            edge_percentiles_ids = torch.arange(0, self.number_edge_samples + 1,
-                                                edge_subsample_rate).clamp(0,self.number_edge_samples - 1)
-            edge_percentiles = (edge_percentiles_ids + 1) / self.count
-            # fix to remove unwanted overlap between edge and target percentiles when seen sample count is too small
-            clip_edge_overlap_at_id = (edge_percentiles < self.target_percentiles[0]).sum()
-            edge_percentiles_ids=edge_percentiles_ids[:clip_edge_overlap_at_id]
-            edge_percentiles = edge_percentiles[:clip_edge_overlap_at_id]
-            quantiles = torch.cat([self.min_values_observed[edge_percentiles_ids], self.percentiles.avg,
-                                   self.max_values_observed[edge_percentiles_ids]])
-            percentiles = torch.cat([edge_percentiles, self.target_percentiles , 1 - reversed(edge_percentiles)])
+            edge_percentiles_ids_min = torch.arange(0, self.number_edge_samples + 1, edge_subsample_rate,device=self.target_percentiles.device).sub(1).clamp(0,self.number_edge_samples - 1)
+            edge_percentiles_ids_max = torch.arange(0, self.number_edge_samples + 1, edge_subsample_rate,device=self.target_percentiles.device).clamp(0,self.number_edge_samples - 1)
+            edge_percentiles_min = (edge_percentiles_ids_min + 1) / self.count
+            edge_percentiles_max = 1 - reversed(edge_percentiles_min)
+            # remove unwanted overlap between edge and target percentiles when seen sample count is too small
+            clip_edge_overlap_at_id_min = (edge_percentiles_min < self.target_percentiles[0]).sum()
+            clip_edge_overlap_at_id_max = (edge_percentiles_max > self.target_percentiles[-1]).sum()
+            edge_percentiles_ids_min = edge_percentiles_ids_min[:clip_edge_overlap_at_id_min]
+            edge_percentiles_min = edge_percentiles_min[:clip_edge_overlap_at_id_min]
+            edge_percentiles_max = edge_percentiles_max[len(edge_percentiles_ids_max)-clip_edge_overlap_at_id_max:]
+            edge_percentiles_ids_max = edge_percentiles_ids_max[len(edge_percentiles_ids_max)-clip_edge_overlap_at_id_max:]
+
+
+            quantiles = torch.cat([self.min_values_observed[edge_percentiles_ids_min], self.percentiles.avg,
+                                   self.max_values_observed[edge_percentiles_ids_max]])
+            percentiles = torch.cat([edge_percentiles_min, self.target_percentiles ,edge_percentiles_max ])
         else:
             quantiles = self.percentiles.avg
             percentiles = self.target_percentiles
+        ## sanity check
+        # if not (quantiles.sort(0)[0]).equal(quantiles):
+        #     arg_sort = quantiles.sort(0)[1]
+        #     for i in range(quantiles.shape[0]):
+        #         find_ = arg_sort[i] != i
+        #         if any(find_):
+        #             print(i,arg_sort[i])
+        #             print(torch.where(find_))
+        #     import pdb; pdb.set_trace()
+        if not percentiles.shape[0] == quantiles.shape[0]:
+            import pdb
+            pdb.set_trace()
         return percentiles,quantiles
 
 def accuracy(output, target, topk=(1,)):

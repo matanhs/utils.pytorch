@@ -4,11 +4,11 @@ import torch
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
-    def __init__(self):
+    def __init__(self,track_last_value=False):
+        self.track_last_value=track_last_value
         self.reset()
 
     def reset(self):
-        self.val = 0
         self.avg = 0
         self.sum = 0
         self.sum_p2 = 0
@@ -17,7 +17,8 @@ class AverageMeter(object):
         self._var_count = 0
 
     def update(self, val, n=1):
-        self.val = val
+        if self.track_last_value:
+            self.val = val
         self.sum += val * n
         self.sum_p2 += n * (val**2)
         self.count += n
@@ -39,7 +40,7 @@ class AverageMeter(object):
 class OnlineMeter(object):
     """Computes and stores the average and variance/std values of tensor"""
     def __init__(self, batched=False, track_cov=False, track_percentiles=False, target_percentiles=None,
-                 per_channel=False, number_edge_samples=0):
+                 per_channel=False, number_edge_samples=0,track_last_value=False):
         self.mean = torch.FloatTensor(1).fill_(-1)
         self.M2 = torch.FloatTensor(1).zero_()
         self.count = 0.
@@ -50,6 +51,10 @@ class OnlineMeter(object):
         self.per_channel = per_channel
         self.target_percentiles = target_percentiles
         self.number_edge_samples = number_edge_samples
+        self.track_last_value=track_last_value
+        if track_cov:
+            self._inv_cov = None
+            self._inv_cov_count = 0
 
     def reset(self, x):
         self.sample_shape = x[0].size()
@@ -83,7 +88,8 @@ class OnlineMeter(object):
         self.needs_init = False
 
     def update(self, x):
-        self.val = x
+        if self.track_last_value:
+            self.val = x
         if not self.batched:
             x_ = x.unsqueeze(0)
         else:
@@ -142,6 +148,12 @@ class OnlineMeter(object):
                                                       x_sorted[-self.number_edge_samples:]]).topk(self.number_edge_samples,
                                                                                                   dim=0, sorted=False,
                                                                                                   largest=True)[0].sort(0)[0]
+    @property
+    def inv_cov(self):
+        if self._inv_cov is None and self.count != self._inv_cov_count:
+            self._inv_cov = torch.inverse(self.cov+torch.eye(self.cov.shape[0],device=self.cov.device)*1e-8)
+            self._inv_cov_count = self.count
+        return self._inv_cov
 
     @property
     def var(self):

@@ -36,6 +36,10 @@ class AverageMeter(object):
     def std(self):
         return self.var**0.5
 
+    @property
+    def mean(self):
+        return self.avg
+
 
 class OnlineMeter(object):
     """Computes and stores the average and variance/std values of tensor"""
@@ -150,7 +154,8 @@ class OnlineMeter(object):
                                                                                                   largest=True)[0].sort(0)[0]
     @property
     def inv_cov(self):
-        if self._inv_cov is None and self.count != self._inv_cov_count:
+        if self._inv_cov is None or self.count != self._inv_cov_count:
+            # add small epsilon to make sure cov is invertible
             self._inv_cov = torch.inverse(self.cov+torch.eye(self.cov.shape[0],device=self.cov.device)*1e-8)
             self._inv_cov_count = self.count
         return self._inv_cov
@@ -292,7 +297,12 @@ class MeterDict(OrderedDict):
     def __setitem__(self, key, value):
         if not isinstance(value, self.online_meter_class):
             meter_val = self.meter_factory(key,value) if self.meter_factory else self.online_meter_class()
-            meter_val.update(value.detach())
+            if not isinstance(value, tuple):
+                if isinstance(value, torch.Tensor):
+                    value = value.detach()
+                meter_val.update(value)
+            else:
+                meter_val.update(*value)
             value = meter_val
         super().__setitem__(key, value)
 
@@ -302,7 +312,13 @@ class MeterDict(OrderedDict):
                 self.__setitem__(k_, v_)
             else:
                 v_old = self.__getitem__(k_)
-                v_old.update(v_.detach())
+                if isinstance(v_,tuple):
+                    v_old.update(*v_)
+                    return
+
+                if isinstance(v_,torch.Tensor):
+                    v_ = v_.detach()
+                v_old.update(v_)
 
         for other in args:
             if hasattr(other, 'keys'):

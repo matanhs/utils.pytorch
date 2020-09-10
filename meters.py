@@ -57,8 +57,8 @@ class OnlineMeter(object):
         self.number_edge_samples = number_edge_samples
         self.track_last_value=track_last_value
         if track_cov:
-            self._inv_cov = None
-            self._inv_cov_count = 0
+            self._inv_cov = {}
+            self._inv_cov_count = {}
 
     def reset(self, x):
         self.sample_shape = x[0].size()
@@ -117,14 +117,15 @@ class OnlineMeter(object):
         centered_x = x_ - self.mean
         # calc variance for now even if covariance if calculated
         # reduce sum batch dimension
-        delta_p2 = centered_x.mul_(centered_x).sum(0)
+        delta_p2 = centered_x.mul(centered_x).sum(0)
         # update second moment accumulator
         self.M2.add_(delta_p2)
         if self.track_covariance:
             if not self.per_channel:
                 #flatten the variable samples for covariance computation,
                 centered_x = centered_x.view(num_observations,self.num_variables)
-            new_covariance = centered_x.transpose(1,0).matmul(centered_x).div_(num_observations)
+
+            new_covariance = centered_x.t().matmul(centered_x).div_(num_observations)
             delta = new_covariance.sub_(self.cov)
             # update mean covariance
             scale = num_observations / self.count
@@ -152,13 +153,24 @@ class OnlineMeter(object):
                                                       x_sorted[-self.number_edge_samples:]]).topk(self.number_edge_samples,
                                                                                                   dim=0, sorted=False,
                                                                                                   largest=True)[0].sort(0)[0]
-    @property
-    def inv_cov(self):
-        if self._inv_cov is None or self.count != self._inv_cov_count:
+
+    def inv_cov(self,sample_channel_ids=None):
+        if sample_channel_ids is not None:
+            sample_channel_ids_key = tuple(sample_channel_ids.cpu().numpy())
+        else:
+            sample_channel_ids_key = None
+
+        if sample_channel_ids_key not in self._inv_cov or self.count != self._inv_cov_count[sample_channel_ids_key]:
             # add small epsilon to make sure cov is invertible
-            self._inv_cov = torch.inverse(self.cov+torch.eye(self.cov.shape[0],device=self.cov.device)*1e-8)
-            self._inv_cov_count = self.count
-        return self._inv_cov
+            #self._inv_cov = torch.pinverse(self.cov,1e-3)
+            if sample_channel_ids is not None:
+                row,col = torch.meshgrid(sample_channel_ids, sample_channel_ids)
+                cov = self.cov[row.to(self.cov.device),col.to(self.cov.device)]
+            else:
+                cov = self.cov
+            self._inv_cov[sample_channel_ids_key] = torch.inverse(cov + torch.eye(cov.shape[0],device=cov.device)*1e-12)
+            self._inv_cov_count[sample_channel_ids_key] = self.count
+        return self._inv_cov[sample_channel_ids_key]
 
     @property
     def var(self):

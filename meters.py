@@ -164,11 +164,12 @@ class OnlineMeter(object):
             # add small epsilon to make sure cov is invertible
             #self._inv_cov = torch.pinverse(self.cov,1e-3)
             if sample_channel_ids is not None:
+                assert len(sample_channel_ids) > 0
                 row,col = torch.meshgrid(sample_channel_ids, sample_channel_ids)
                 cov = self.cov[row.to(self.cov.device),col.to(self.cov.device)]
             else:
                 cov = self.cov
-            self._inv_cov[sample_channel_ids_key] = torch.inverse(cov + torch.eye(cov.shape[0],device=cov.device)*1e-12)
+            self._inv_cov[sample_channel_ids_key] = torch.pinverse(cov, 1e-12)
             self._inv_cov_count[sample_channel_ids_key] = self.count
         return self._inv_cov[sample_channel_ids_key]
 

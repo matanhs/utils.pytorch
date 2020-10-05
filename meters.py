@@ -298,11 +298,27 @@ class ConfusionMeter(AccuracyMeter):
     def per_class_accuracy(self):
         return self._confusion_matrix.diag() / self._confusion_matrix.sum(1)
 
+
+def simple_auc(TPR, FPR, rho=1, n_boxes=1000):
+    import numpy as np
+    ## TPR and FPR are expected to by numpy array
+    TPR = np.interp(np.linspace(0, 1, n_boxes), FPR, TPR)
+    FPR = np.linspace(0, 1, n_boxes)
+    ## Filtering according to rho
+    TPR = TPR[FPR < rho]
+    FPR = FPR[FPR < rho]
+    dTPR = np.hstack((0, np.diff(TPR)))
+    dFPR = np.hstack((0, np.diff(FPR)))
+    return sum(TPR * dFPR) + sum(dTPR * dFPR) / 2
+
+
 ### a dictionary of meters, used in conjunction with CorrCriterionWrapper stats recorder to aggregate statistics
 # (due to OnlineMeter restriction only expects a single observation at a time by default)
 from _collections import OrderedDict
+
+
 class MeterDict(OrderedDict):
-    def __init__(self, online_meter_class=OnlineMeter,meter_factory=None):
+    def __init__(self, online_meter_class=OnlineMeter, meter_factory=None):
         super().__init__()
         self.online_meter_class = online_meter_class
         self.meter_factory = meter_factory
@@ -345,7 +361,10 @@ class MeterDict(OrderedDict):
             self.update(kwargs)
 
     def __repr__(self):
-        return f'{dict([(k, v.mean) for (k, v) in self.items()])}'
+        return f'{self.get_mean_dict()}'
+
+    def get_mean_dict(self):
+        return dict([(k, v.mean.squeeze().numpy()) for (k, v) in self.items()])
 
 
 if __name__ == '__main__':

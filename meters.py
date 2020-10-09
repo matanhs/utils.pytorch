@@ -299,9 +299,11 @@ class ConfusionMeter(AccuracyMeter):
         return self._confusion_matrix.diag() / self._confusion_matrix.sum(1)
 
 
-def simple_auc(TPR, FPR, rho=1, n_boxes=1000):
+def simple_auc(TPR_, FPR_, rho=1, n_boxes=1000):
     import numpy as np
     ## TPR and FPR are expected to by numpy array
+    TPR = np.concatenate([[0.], TPR_])
+    FPR = np.concatenate([[FPR_[0]], FPR_])
     TPR = np.interp(np.linspace(0, 1, n_boxes), FPR, TPR)
     FPR = np.linspace(0, 1, n_boxes)
     ## Filtering according to rho
